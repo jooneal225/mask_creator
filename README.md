@@ -21,8 +21,26 @@ Or equivalently, by hand:
 ```bash
 conda create -n mask_creator python=3.11 -y
 conda activate mask_creator
-conda install -c conda-forge pyqt=5.15 pyqtgraph h5py numpy pillow -y
+conda install -c conda-forge pyqt=5.15 pyqtgraph h5py hdf5plugin numpy pillow -y
 ```
+
+### Compressed detector files
+
+`hdf5plugin` is not optional. The 12-ID detector files are written with
+external HDF5 compression filters — LZ4 (id 32004) on the Pilatus and Eiger
+data — and those are **not** built into the conda-forge HDF5 build. Without a
+registered filter, every read fails with the unhelpful
+
+```
+Can't synchronously read data (can't open directory)
+```
+
+`mask_creator/io_utils.py` imports `hdf5plugin` before h5py, which registers
+the bundled filter libraries directly. That deliberately avoids depending on
+the `HDF5_PLUGIN_PATH` environment variable, which on this machine points at
+`matSAXS_12ID_Nov2025/CMS_SAXS/plugins` for MATLAB's benefit and is only
+visible to shells started after it was set. If a filter is still missing, the
+app now reports which one by name instead of the raw HDF5 message.
 
 ## Running
 

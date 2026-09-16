@@ -28,8 +28,24 @@ import re
 import struct
 from pathlib import Path
 
-import h5py
 import numpy as np
+
+# Detector files from 12-ID are written with external HDF5 compression
+# filters -- LZ4 (32004) on the Pilatus/Eiger data, and bitshuffle or blosc
+# elsewhere.  Those are not built into the conda-forge HDF5 build, so without
+# a registered plugin any read fails with the opaque
+# "Can't synchronously read data (can't open directory)".
+#
+# Importing hdf5plugin registers the bundled filter libraries directly, which
+# means the app does not depend on HDF5_PLUGIN_PATH being set in whatever
+# shell it happens to be launched from.  It must be imported before the first
+# read; importing it before h5py keeps that unambiguous.
+try:
+    import hdf5plugin  # noqa: F401
+except ImportError:  # pragma: no cover - only if the env is incomplete
+    hdf5plugin = None
+
+import h5py
 
 # Dataset that carries the mask inside an h5 output file.
 H5_MASK_DATASET = "valid_pixel_mask"
@@ -89,6 +105,48 @@ def _resolve_dataset(h5file):
     )
 
 
+# HDF5 filter ids we expect to meet, for a readable error message.
+_FILTER_NAMES = {
+    307: "bzip2",
+    32000: "LZF",
+    32001: "Blosc",
+    32004: "LZ4",
+    32008: "bitshuffle",
+    32013: "ZFP",
+    32015: "Zstandard",
+}
+
+
+def _filter_hint(dataset, name, exc):
+    """Turn an opaque HDF5 read failure into something actionable.
+
+    A missing compression filter surfaces as "can't open directory", which
+    says nothing about the real cause.
+    """
+    try:
+        plist = dataset.id.get_create_plist()
+        filters = [plist.get_filter(i)[0] for i in range(plist.get_nfilters())]
+    except Exception:  # pragma: no cover - diagnostics must never mask the error
+        filters = []
+
+    external = [f for f in filters if f not in (1, 2, 3)]  # deflate/shuffle/fletcher
+    if not external:
+        return f"Could not read {name!r}: {exc}"
+
+    described = ", ".join(
+        f"{_FILTER_NAMES.get(f, 'filter ' + str(f))} ({f})" for f in external
+    )
+    installed = "is installed" if hdf5plugin is not None else "is NOT installed"
+    return (
+        f"Could not read {name!r}: the dataset is compressed with {described}, "
+        f"and HDF5 could not load that filter.\n\n"
+        f"The hdf5plugin package {installed} in this environment.\n\n"
+        "Fix with:\n"
+        "    conda install -c conda-forge hdf5plugin\n\n"
+        f"Underlying error: {exc}"
+    )
+
+
 def load_h5_image(path, dataset=None):
     """Load a detector image from an h5 file.
 
@@ -115,7 +173,10 @@ def load_h5_image(path, dataset=None):
         node = f[name]
         if not isinstance(node, h5py.Dataset):
             raise MaskIOError(f"{name!r} is a group, not a dataset")
-        data = node[()]
+        try:
+            data = node[()]
+        except OSError as exc:
+            raise MaskIOError(_filter_hint(node, name, exc)) from exc
 
     data = np.asarray(data)
     # Collapse length-1 leading axes, e.g. (1, 1679, 1475) -> (1679, 1475).

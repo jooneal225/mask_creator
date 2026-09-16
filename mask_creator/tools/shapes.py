@@ -13,6 +13,8 @@ class _ShapeTool(BaseTool):
 
     buttons = ("apply", "cancel")
     roi_kind = "rect"
+    #: A rotate handle is pointless on a shape with no orientation.
+    rotatable = True
 
     def __init__(self, window):
         super().__init__(window)
@@ -20,6 +22,10 @@ class _ShapeTool(BaseTool):
 
     def _make_roi(self, pos, size):
         raise NotImplementedError
+
+    def update_color(self):
+        if self._roi is not None:
+            self._roi.setPen(pg.mkPen(self.color, width=2))
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -55,7 +61,8 @@ class _ShapeTool(BaseTool):
 
         self._roi = self._make_roi(pos, (size, size))
         self._roi.setZValue(20)
-        self._roi.addRotateHandle([1.0, 0.0], [0.5, 0.5])
+        if self.rotatable:
+            self._roi.addRotateHandle([1.0, 0.0], [0.5, 0.5])
         self.viewbox.addItem(self._roi)
 
     def _remove(self):
@@ -67,10 +74,13 @@ class _ShapeTool(BaseTool):
 class CircleTool(_ShapeTool):
     title = "Circle"
     roi_kind = "ellipse"
+    # CircleROI locks the aspect ratio and exposes a single radius handle, so
+    # the shape can only ever be a true circle.  Rotating one is meaningless.
+    rotatable = False
 
     def _make_roi(self, pos, size):
-        return pg.EllipseROI(
-            pos, size, pen=pg.mkPen("#ffb300", width=2), removable=False
+        return pg.CircleROI(
+            pos, size, pen=pg.mkPen(self.color, width=2), removable=False
         )
 
 
@@ -80,5 +90,5 @@ class RectangleTool(_ShapeTool):
 
     def _make_roi(self, pos, size):
         return pg.RectROI(
-            pos, size, pen=pg.mkPen("#ffb300", width=2), removable=False
+            pos, size, pen=pg.mkPen(self.color, width=2), removable=False
         )

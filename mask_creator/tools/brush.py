@@ -24,8 +24,7 @@ class BrushTool(BaseTool):
 
     def activate(self):
         self._cursor = QGraphicsEllipseItem()
-        self._cursor.setPen(pg.mkPen("#00e5ff", width=1))
-        self._cursor.setBrush(pg.mkBrush(0, 229, 255, 40))
+        self._apply_color()
         self._cursor.setZValue(25)
         self._cursor.setVisible(False)
         self.viewbox.addItem(self._cursor, ignoreBounds=True)
@@ -35,6 +34,15 @@ class BrushTool(BaseTool):
             "Paintbrush: click and drag to paint. The Add/Remove switch decides "
             "whether the stroke adds to or erases from the mask."
         )
+
+    def _apply_color(self):
+        c = self.color
+        self._cursor.setPen(pg.mkPen(c, width=1))
+        self._cursor.setBrush(pg.mkBrush(c.red(), c.green(), c.blue(), 40))
+
+    def update_color(self):
+        if self._cursor is not None:
+            self._apply_color()
 
     def deactivate(self):
         if self._cursor is not None:

@@ -25,15 +25,15 @@ class PolygonTool(BaseTool):
 
     def activate(self):
         self._preview = pg.PlotDataItem(
-            pen=pg.mkPen("#00e5ff", width=2),
+            pen=pg.mkPen(self.color, width=2),
             symbol="o",
             symbolSize=7,
-            symbolBrush="#00e5ff",
+            symbolBrush=self.color,
             symbolPen=None,
         )
         self._preview.setZValue(20)
         self._cursor = pg.PlotDataItem(
-            pen=pg.mkPen("#00e5ff", width=1, style=Qt.DashLine)
+            pen=pg.mkPen(self.color, width=1, style=Qt.DashLine)
         )
         self._cursor.setZValue(20)
         self.viewbox.addItem(self._preview)
@@ -50,6 +50,15 @@ class PolygonTool(BaseTool):
                 self.viewbox.removeItem(item)
         self._preview = self._cursor = self._roi = None
         self._points = []
+
+    def update_color(self):
+        if self._preview is not None:
+            self._preview.setPen(pg.mkPen(self.color, width=2))
+            self._preview.setSymbolBrush(self.color)
+        if self._cursor is not None:
+            self._cursor.setPen(pg.mkPen(self.color, width=1, style=Qt.DashLine))
+        if self._roi is not None:
+            self._roi.setPen(pg.mkPen(self.color, width=2))
 
     # -- mouse -------------------------------------------------------------
 
@@ -93,7 +102,7 @@ class PolygonTool(BaseTool):
             self._points,
             closed=True,
             movable=True,
-            pen=pg.mkPen("#00e5ff", width=2),
+            pen=pg.mkPen(self.color, width=2),
             handlePen=pg.mkPen("#ffffff", width=1),
         )
         self._roi.setZValue(20)

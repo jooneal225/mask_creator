@@ -34,6 +34,11 @@ class BaseTool(QObject):
     def image_shape(self):
         return self.window.model.shape
 
+    @property
+    def color(self):
+        """The mask overlay colour, so a tool's outline matches what it paints."""
+        return self.window.mask_color
+
     def commit(self, selection):
         """Push a selection through the Add/Remove switch into the model."""
         n = self.model.apply(selection, add=self.window.add_mode)
@@ -52,6 +57,9 @@ class BaseTool(QObject):
 
     def deactivate(self):
         """Tear everything down; must be safe to call twice."""
+
+    def update_color(self):
+        """Re-apply ``self.color`` to any graphics items this tool owns."""
 
     # -- mouse hooks; return True to consume the event ---------------------
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtGui import QColor, QKeySequence
 from PyQt5.QtWidgets import (
     QAction,
@@ -52,7 +52,9 @@ pg.setConfigOptions(imageAxisOrder="row-major", antialias=False)
 
 DEFAULT_OPACITY = 45
 DEFAULT_MASK_COLOR = QColor(255, 40, 40)
-PREVIEW_COLOR = QColor(0, 229, 255)
+
+SETTINGS_ORG = "12ID"
+SETTINGS_APP = "MaskCreator"
 
 _SWITCH_STYLE = """
 QPushButton { padding: 7px; border: 1px solid #666; border-radius: 3px; }
@@ -67,6 +69,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Mask Creator")
         self.resize(1500, 950)
 
+        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self.model = MaskModel(self)
         self.model.changed.connect(self._on_mask_changed)
 
@@ -84,14 +87,18 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(central)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addWidget(panel, 0)
-        layout.addWidget(self.graph, 1)
+        layout.addWidget(self._build_graph_container(), 1)
         self.setCentralWidget(central)
 
         self.statusBar().showMessage("Load an h5 image to begin.")
         self._build_shortcuts()
+        self._restore_settings()
         self._update_mask_lut()
         self._sync_enabled()
 
+        # An explicit command-line path wins over the remembered one, and is
+        # the only case that loads automatically -- reopening the app should
+        # not spend seconds reading a large stack you may not want.
         if initial_path:
             self.path_edit.setText(str(initial_path))
             self.load_image()
@@ -116,18 +123,11 @@ class MainWindow(QMainWindow):
         self.mask_item.setOpacity(DEFAULT_OPACITY / 100.0)
         self.viewbox.addItem(self.mask_item)
 
-        # Live outline of a brush stroke before it is committed.
+        # Live outline of a brush stroke before it is committed.  Its colour
+        # is set alongside the mask's in _update_mask_lut.
         self.preview_item = pg.ImageItem()
         self.preview_item.setZValue(15)
         self.preview_item.setOpacity(0.55)
-        self.preview_item.setLookupTable(
-            np.array(
-                [[0, 0, 0, 0],
-                 [PREVIEW_COLOR.red(), PREVIEW_COLOR.green(),
-                  PREVIEW_COLOR.blue(), 255]],
-                dtype=np.ubyte,
-            )
-        )
         self.viewbox.addItem(self.preview_item)
 
         self.histogram = pg.HistogramLUTItem(image=self.image_item)
@@ -139,6 +139,23 @@ class MainWindow(QMainWindow):
         self.overlay.cancelClicked.connect(lambda: self._tool_call("cancel"))
 
         self._build_context_menu()
+
+    def _build_graph_container(self):
+        """The graph plus a legend naming what the overlay colour means."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        legend = QHBoxLayout()
+        self.mask_swatch = QLabel()
+        self.mask_swatch.setFixedSize(14, 14)
+        legend.addWidget(self.mask_swatch)
+        legend.addWidget(QLabel("Masked pixels excluded from data reduction"))
+        legend.addStretch(1)
+        layout.addLayout(legend)
+        layout.addWidget(self.graph, 1)
+        return container
 
     def _build_context_menu(self):
         menu = self.viewbox.menu.addMenu("Mask")
@@ -242,6 +259,10 @@ class MainWindow(QMainWindow):
         layout.addLayout(form)
 
         self.log_check = QCheckBox("Log (log10 of image)")
+        # On by default: these detector frames have a median of a few counts
+        # against a beam centre in the millions, so the linear view is almost
+        # entirely black and the features you mask around are invisible.
+        self.log_check.setChecked(True)
         self.log_check.toggled.connect(self._redraw_image)
         layout.addWidget(self.log_check)
 
@@ -390,6 +411,11 @@ class MainWindow(QMainWindow):
         return self.brush_slider.value()
 
     @property
+    def mask_color(self):
+        """Overlay colour; tools draw their outlines in it so the two match."""
+        return self._mask_color
+
+    @property
     def image(self):
         """The raw 2D working image; what the threshold tool reads."""
         return self._image
@@ -437,6 +463,9 @@ class MainWindow(QMainWindow):
 
         self._refresh_working_image(reset_view=True)
         self.status(f"Loaded {Path(path).name} [{name}]")
+        # Remember it now rather than only at exit, so an unclean shutdown
+        # does not lose it.
+        self.settings.setValue("io/last_image_path", path)
         self._sync_enabled()
 
     def _refresh_working_image(self, *_args, reset_view=False):
@@ -498,11 +527,18 @@ class MainWindow(QMainWindow):
 
     def _update_mask_lut(self):
         c = self._mask_color
-        self.mask_item.setLookupTable(
-            np.array([[0, 0, 0, 0], [c.red(), c.green(), c.blue(), 255]],
-                     dtype=np.ubyte)
+        lut = np.array(
+            [[0, 0, 0, 0], [c.red(), c.green(), c.blue(), 255]], dtype=np.ubyte
         )
+        self.mask_item.setLookupTable(lut)
+        self.preview_item.setLookupTable(lut)
         self.color_btn.setStyleSheet(f"background-color: {c.name()};")
+        self.mask_swatch.setStyleSheet(
+            f"background-color: {c.name()}; border: 1px solid #555;"
+        )
+        # Keep the armed tool's outline in step with the overlay.
+        if self._active_tool is not None:
+            self._active_tool.update_color()
 
     def _set_opacity(self, value):
         for slider in (self.opacity_slider, self.ctx_opacity):
@@ -660,6 +696,30 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Misc
     # ==================================================================
+
+    # -- persistence -------------------------------------------------------
+
+    def _restore_settings(self):
+        geometry = self.settings.value("window/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+        last = self.settings.value("io/last_image_path", "", type=str)
+        if last:
+            self.path_edit.setText(last)
+            self.statusBar().showMessage(
+                f"Last file: {Path(last).name}  --  press Load Image to open it."
+            )
+
+    def _save_settings(self):
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        self.settings.setValue("io/last_image_path", self.path_edit.text().strip())
+
+    def closeEvent(self, event):
+        self._save_settings()
+        super().closeEvent(event)
+
+    # -- misc --------------------------------------------------------------
 
     def _sync_enabled(self):
         has_mask = self.model.shape != (0, 0)

@@ -1,0 +1,10 @@
+name: mask_creator
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pyqt=5.15
+  - pyqtgraph
+  - h5py
+  - numpy
+  - pillow

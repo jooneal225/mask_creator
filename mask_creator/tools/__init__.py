@@ -10,6 +10,7 @@ from .brush import BrushTool
 from .polygon import PolygonTool
 from .shapes import CircleTool, RectangleTool
 from .threshold import ThresholdDialog
+from .variance_threshold import VarianceThresholdDialog
 
 TOOL_REGISTRY = {
     "polygon": PolygonTool,
@@ -25,5 +26,6 @@ __all__ = [
     "PolygonTool",
     "RectangleTool",
     "ThresholdDialog",
+    "VarianceThresholdDialog",
     "TOOL_REGISTRY",
 ]

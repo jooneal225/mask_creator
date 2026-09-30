@@ -65,8 +65,20 @@ operations.</p>
 beamline's existing masks use.</p>
 <p>In both formats the stored convention is <b>1 = valid pixel, 0 = masked</b>,
 the same as <tt>maskmake.m</tt> and <tt>combineMask.m</tt>. In the BMP that
-means masked pixels are black. No vertical flip is applied in either
-direction, so row 0 of the h5 image is row 0 of the mask.</p>
+means masked pixels are black.</p>
 <p><b>Load Existing Mask</b> reads either format back, plus png and tif, and
 transposes automatically if that is what it takes to match the image.</p>
+<p>Two orientation controls live in the <b>Tools</b> menu.
+<b>Bitmap rows</b> sets how bmp/png/tif masks are oriented on disk relative to
+the image shown here, and applies to both saving and loading. <i>Inverted</i>,
+the default, flips the rows top-to-bottom, matching the bitmaps already in use
+at the beamline; <i>Same as display</i> keeps row 0 of the h5 image as row 0 of
+the mask. HDF5 masks are never flipped.</p>
+<p><b>Flip mask vertically</b>, just below it, is a one-off action rather than
+a setting: it mirrors the mask you currently have top-to-bottom, which fixes a
+mask that came in upside down. It is a normal undo step.</p>
+
+<h3>Settings</h3>
+<p><b>Invert Mask</b> swaps masked and unmasked pixels everywhere &mdash; the
+same as the right-click <b>Mask &rarr; Invert mask</b> entry.</p>
 """

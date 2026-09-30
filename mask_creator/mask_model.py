@@ -100,6 +100,14 @@ class MaskModel(QObject):
         self._mask = ~self._mask
         self.changed.emit()
 
+    def flip_vertical(self):
+        """Mirror the mask top-to-bottom, e.g. after loading a flipped bitmap."""
+        if self._mask.size == 0:
+            return
+        self._push_undo()
+        self._mask = self._mask[::-1].copy()
+        self.changed.emit()
+
     # -- undo / redo -------------------------------------------------------
 
     def _push_undo(self):

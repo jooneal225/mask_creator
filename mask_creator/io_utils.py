@@ -15,10 +15,15 @@ this module; nothing else in the app needs to think about it.
 
 Orientation
 -----------
-Row 0 of the h5 image corresponds to row 0 of the mask array.  No vertical
-flip is applied on save or load, matching ``maskmake.m`` (savemask/loadmask)
-and ``qCalibration2.m`` (which reads masks with the ``imgUpsideDn`` variant
-commented out).
+For h5 masks, row 0 of the image corresponds to row 0 of the mask array; no
+vertical flip is applied on save or load, matching ``maskmake.m``
+(savemask/loadmask) and ``qCalibration2.m`` (which reads masks with the
+``imgUpsideDn`` variant commented out).
+
+Bitmap masks are the exception: ``save_mask_bmp`` and ``load_mask`` take a
+``flip_vertical`` flag, because the bitmaps in circulation were written by
+tools that treat row 0 as the *bottom* row.  The app defaults it to on for
+bmp/png/tif, and the user can switch it in the Output panel.
 """
 
 from __future__ import annotations
@@ -202,6 +207,70 @@ def project_stack(data, mode="frame", frame=0):
     return data[int(np.clip(frame, 0, data.shape[0] - 1))]
 
 
+class VarianceCancelled(Exception):
+    """Raised by compute_pixelwise_variance when ``progress`` returns falsy."""
+
+
+def compute_pixelwise_variance(paths, progress=None):
+    """Pixel-wise variance across every frame found in ``paths``.
+
+    Each path is loaded with :func:`load_h5_image`; a 2D result counts as one
+    frame, a 3D result (stack) contributes one frame per entry along its
+    first axis. Frames are accumulated with Welford's online algorithm, so
+    peak memory is one file's data plus two image-sized accumulators --
+    never a full stack of every frame across every file.
+
+    Parameters
+    ----------
+    paths : sequence of str or Path
+    progress : callable, optional
+        Called as ``progress(index, total, path)`` after each *file* (not
+        each frame) finishes, ``index`` starting at 1. If it returns a
+        falsy value, :class:`VarianceCancelled` is raised.
+
+    Returns
+    -------
+    (variance, n_frames)
+    """
+    paths = list(paths)
+    mean = m2 = shape = None
+    n = 0
+
+    for i, path in enumerate(paths):
+        try:
+            data, name = load_h5_image(path)
+        except (MaskIOError, OSError) as exc:
+            raise MaskIOError(f"{Path(path).name}: {exc}") from exc
+
+        frames = data[np.newaxis, ...] if data.ndim == 2 else data
+        for frame in frames:
+            frame = np.asarray(frame, dtype=np.float64)
+            if shape is None:
+                shape = frame.shape
+                mean = np.zeros(shape, dtype=np.float64)
+                m2 = np.zeros(shape, dtype=np.float64)
+            elif frame.shape != shape:
+                raise MaskIOError(
+                    f"{Path(path).name}: dataset {name!r} has image shape "
+                    f"{frame.shape}, which does not match the first file's "
+                    f"shape {shape}."
+                )
+            n += 1
+            delta = frame - mean
+            mean += delta / n
+            m2 += delta * (frame - mean)
+
+        if progress is not None and not progress(i + 1, len(paths), path):
+            raise VarianceCancelled()
+
+    if n < 2:
+        raise MaskIOError(
+            "Need at least two images in total across the selected files to "
+            "compute a variance."
+        )
+    return m2 / n, n
+
+
 # --------------------------------------------------------------------------
 # Mask input
 # --------------------------------------------------------------------------
@@ -245,8 +314,13 @@ def _load_mask_image(path):
         return np.asarray(im)
 
 
-def load_mask(path, expected_shape=None):
-    """Load a mask from h5/bmp/png/tif.  Returns bool array, True = masked."""
+def load_mask(path, expected_shape=None, flip_vertical=False):
+    """Load a mask from h5/bmp/png/tif.  Returns bool array, True = masked.
+
+    ``flip_vertical`` reverses the row order after the mask has been brought
+    into the image's orientation, so it means the same thing here as it does
+    in :func:`save_mask_bmp`: load(save(m, flip)) == m.
+    """
     path = Path(path)
     if not path.exists():
         raise MaskIOError(f"File not found: {path}")
@@ -264,7 +338,10 @@ def load_mask(path, expected_shape=None):
         raise MaskIOError(f"Expected a 2D mask, got shape {valid.shape}")
 
     masked = valid == 0  # stored 0 = masked, nonzero = valid
-    return _orient(masked, expected_shape)
+    masked = _orient(masked, expected_shape)
+    if flip_vertical:
+        masked = masked[::-1]
+    return masked
 
 
 # --------------------------------------------------------------------------
@@ -291,16 +368,21 @@ def save_mask_h5(path, masked):
         dset.attrs["created"] = datetime.datetime.now().isoformat(timespec="seconds")
 
 
-def save_mask_bmp(path, masked):
+def save_mask_bmp(path, masked, flip_vertical=False):
     """Write a 1-bit BMP, white = valid, byte-compatible with the beamline files.
 
     Hand-rolled rather than going through Pillow so the header matches the
     existing masks exactly: BITMAPINFOHEADER, BI_RGB, bottom-up, no DPI
     fields, 2-entry black/white palette.
+
+    With ``flip_vertical`` the rows are reversed before packing, so the image
+    in the file is upside down relative to what the app displays.
     """
     masked = np.asarray(masked, dtype=bool)
     if masked.ndim != 2:
         raise MaskIOError(f"Expected a 2D mask, got shape {masked.shape}")
+    if flip_vertical:
+        masked = masked[::-1]
 
     height, width = masked.shape
     valid = (~masked).astype(np.uint8)

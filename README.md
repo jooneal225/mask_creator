@@ -79,10 +79,14 @@ choose becomes the "original image" that the threshold tool reads.
 
 ### Log display
 
-**Log** shows `log10` of the image. Non-positive pixels are clamped up to the
-smallest positive value in the frame rather than becoming `-inf`, which would
-break auto-levelling. This is a display setting only: it never affects the mask
-or the threshold tool.
+**Log** shows `log10` of the image, and is **on by default**. These frames have
+a median of a few counts against a beam centre in the millions, so the linear
+view is almost entirely black and the features you mask around are invisible.
+
+Non-positive pixels are clamped up to the smallest positive value in the frame
+rather than becoming `-inf`, which would break auto-levelling. This is a
+display setting only: it never affects the mask or the threshold tool, both of
+which work on the raw values.
 
 ---
 
@@ -144,14 +148,25 @@ byte for byte.
 | Tool | Notes |
 |---|---|
 | **Polygon** | Click to place vertices, right-click to remove the last. **Complete Polygon** closes the loop into a shape you can drag and reshape by its handles. **Apply** closes it if still open and commits. Stays armed so you can draw several regions in a row. |
-| **Circle** / **Rectangle** | An outline appears in the middle of the view with resize and rotate handles. **Apply** commits and leaves the shape in place, so the same shape can be stamped repeatedly. |
+| **Circle** | A true circle — the ROI's aspect ratio is locked and it has a single radius handle, so it cannot be dragged into an ellipse. No rotate handle, which would mean nothing on a circle. **Apply** commits and leaves the shape in place, so it can be stamped repeatedly. |
+| **Rectangle** | An outline with resize *and* rotate handles. **Apply** commits and leaves the shape in place. |
 | **Paintbrush** | Click and drag to paint; the slider sets the diameter in image pixels and a ring previews it on the cursor. One stroke is one undo step. |
 | **Apply Threshold** | Selects pixels of the original image with `min <= value <= max`. Defaults `-inf` / `-0.1` catch the negative sentinels Pilatus and Eiger write into module gaps and dead pixels. The dialog counts the affected pixels live before you commit. |
 
 Every tool obeys the **ADD / REMOVE** switch, so the same controls that build
 the mask also erase it.
 
+Every tool also draws its outline in the current mask colour — the polygon's
+line, vertex markers and rubber band, the circle and rectangle outlines, the
+brush cursor ring, and the uncommitted brush-stroke preview — and follows it
+live when you change that colour. A tool's preview therefore always matches
+the overlay it is about to paint into.
+
 ### The graph
+
+The overlay marks the pixels that are **excluded**: the ones that get dropped
+when you multiply your data by `valid_pixel_mask`. The legend above the graph
+says so, with a swatch tracking the overlay colour.
 
 Scroll to zoom, right-drag to box-zoom, middle-drag to pan. While the
 paintbrush is armed the left button paints instead of panning; everything else
@@ -164,6 +179,17 @@ go.
 
 `Ctrl+Z` / `Ctrl+Y` undo and redo the last 30 operations. `Esc` disarms the
 current tool.
+
+### Remembered between sessions
+
+`QSettings` (registry key `12ID/MaskCreator` on Windows) stores the window
+geometry and the last h5 path you loaded.
+
+The path is restored into the input box but **not** opened automatically, so
+relaunching does not spend time reading a large stack you may not want — press
+**Load Image** when you do. A path given on the command line overrides the
+remembered one and loads straight away. The remembered path is written as soon
+as a load succeeds, not only at exit, so an unclean shutdown does not lose it.
 
 ---
 
@@ -187,13 +213,13 @@ a button in `_build_tools_group`, or wire it into the context menu in
 ## Layout
 
 ```
-+-- I/O & Controls ------------+  +-- Graph -----------------------+
-| Input                        |  | [Apply][Complete][Cancel]      |
-|   path            [Browse]   |  |                                |
-|   [Load Image]               |  |                                |
-|   Dataset:  auto             |  |      image + mask overlay      |
-|   Display:  frame / sum / max|  |                                |
-|   [ ] Log (log10 of image)   |  |                                |
++-- I/O & Controls ------------+  [#] Masked pixels excluded from
+| Input                        |      data reduction
+|   path            [Browse]   |  +-- Graph -----------------------+
+|   [Load Image]               |  | [Apply][Complete][Cancel]      |
+|   Dataset:  auto             |  |                                |
+|   Display:  frame / sum / max|  |      image + mask overlay      |
+|   [x] Log (log10 of image)   |  |                                |
 | Output                       |  |                                |
 |   [Save HDF5] [Save BMP]     |  |                                |
 |   [Load Existing Mask]       |  +--------------------------------+
